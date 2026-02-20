@@ -35,6 +35,23 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
+        <!-- Spring Kafka's JsonSerializer/JsonDeserializer depend on Jackson 2.x.
+             Spring Boot 4.x uses Jackson 3.x (tools.jackson) by default, so
+             com.fasterxml.jackson.databind is no longer on the classpath transitively.
+             Adding it explicitly resolves ClassNotFoundException on JavaType. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.2</version>
+        </dependency>
+
+        <!-- JavaTimeModule for java.time.Instant support in NotificationEvent -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>2.18.2</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
