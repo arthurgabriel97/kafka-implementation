@@ -1,14 +1,13 @@
 package com.arthur.kafkaimplementation.producer;
 
 import com.arthur.kafkaimplementation.dto.NotificationEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.stereotype.Service;
-
-import java.util.concurrent.CompletableFuture;
+import io.quarkus.logging.Log;
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.reactive.messaging.Channel;
+import org.eclipse.microprofile.reactive.messaging.Emitter;
+import org.eclipse.microprofile.reactive.messaging.Message;
 
 /**
  * Producer de notificações para o Kafka.
@@ -21,37 +20,27 @@ import java.util.concurrent.CompletableFuture;
  *   Sem chave → round-robin entre partições → notificações do mesmo usuário
  *               podem ser processadas fora de ordem por consumers diferentes.
  */
-@Service
+@ApplicationScoped
 public class NotificationProducer {
 
-    private static final Logger log = LoggerFactory.getLogger(NotificationProducer.class);
-
-    private final KafkaTemplate<String, NotificationEvent> kafkaTemplate;
-    private final String topic;
-
-    public NotificationProducer(
-            KafkaTemplate<String, NotificationEvent> kafkaTemplate,
-            @Value("${app.kafka.topic.notifications}") String topic
-    ) {
-        this.kafkaTemplate = kafkaTemplate;
-        this.topic = topic;
-    }
+    @Inject
+    @Channel("notifications-out")
+    Emitter<NotificationEvent> emitter;
 
     public void send(NotificationEvent event) {
-        CompletableFuture<SendResult<String, NotificationEvent>> future =
-                kafkaTemplate.send(topic, event.userId(), event);
+        var metadata = OutgoingKafkaRecordMetadata.<String>builder()
+                .withKey(event.userId())
+                .build();
 
-        future.whenComplete((result, ex) -> {
-            if (ex != null) {
-                log.error("Falha ao publicar notificação — userId={} error={}",
-                        event.userId(), ex.getMessage());
-            } else {
-                log.info("Notificação publicada — userId={} type={} partition={} offset={}",
-                        event.userId(),
-                        event.type(),
-                        result.getRecordMetadata().partition(),
-                        result.getRecordMetadata().offset());
-            }
-        });
+        emitter.send(Message.of(event).addMetadata(metadata))
+                .whenComplete((v, ex) -> {
+                    if (ex != null) {
+                        Log.errorf("Falha ao publicar notificação — userId=%s error=%s",
+                                event.userId(), ex.getMessage());
+                    } else {
+                        Log.infof("Notificação publicada — userId=%s type=%s",
+                                event.userId(), event.type());
+                    }
+                });
     }
 }

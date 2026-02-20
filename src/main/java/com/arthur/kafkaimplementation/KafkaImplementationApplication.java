@@ -1,13 +1,12 @@
 package com.arthur.kafkaimplementation;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
+import io.quarkus.runtime.Quarkus;
+import io.quarkus.runtime.annotations.QuarkusMain;
 
-@SpringBootApplication
+@QuarkusMain
 public class KafkaImplementationApplication {
 
-    public static void main(String[] args) {
-        SpringApplication.run(KafkaImplementationApplication.class, args);
+    public static void main(String... args) {
+        Quarkus.run(args);
     }
-
 }
