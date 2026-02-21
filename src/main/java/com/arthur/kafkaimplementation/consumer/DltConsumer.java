@@ -1,12 +1,14 @@
 package com.arthur.kafkaimplementation.consumer;
 
 import com.arthur.kafkaimplementation.dto.NotificationEvent;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.stereotype.Component;
+import io.quarkus.logging.Log;
+import io.smallrye.reactive.messaging.annotations.Blocking;
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
+import org.eclipse.microprofile.reactive.messaging.Incoming;
+import org.eclipse.microprofile.reactive.messaging.Message;
+
+import java.util.concurrent.CompletionStage;
 
 /**
  * Consumer do Dead Letter Topic (DLT).
@@ -21,23 +23,20 @@ import org.springframework.stereotype.Component;
  * Grupo separado "notification-dlt-group" → independente do consumer principal.
  * Isso significa que parar o consumer principal não para o DLT consumer e vice-versa.
  */
-@Component
+@ApplicationScoped
 public class DltConsumer {
 
-    private static final Logger log = LoggerFactory.getLogger(DltConsumer.class);
+    @Incoming("notifications-dlt-in")
+    @Acknowledgment(Acknowledgment.Strategy.MANUAL)
+    @Blocking
+    public CompletionStage<Void> consume(Message<NotificationEvent> message) {
+        NotificationEvent event = message.getPayload();
 
-    @KafkaListener(
-            topics = "${app.kafka.topic.dead-letter}",
-            groupId = "notification-dlt-group"
-    )
-    public void consume(ConsumerRecord<String, NotificationEvent> record, Acknowledgment ack) {
-        NotificationEvent event = record.value();
-
-        log.warn("[DLT] Notificacao descartada por rate limit — userId={} type={} mensagem=\"{}\" sentAt={}",
+        Log.warnf("[DLT] Notificacao descartada por rate limit — userId=%s type=%s mensagem=\"%s\" sentAt=%s",
                 event.userId(), event.type(), event.message(), event.sentAt());
 
         // Aqui: persistir para retry posterior, emitir métrica, etc.
 
-        ack.acknowledge();
+        return message.ack();
     }
 }

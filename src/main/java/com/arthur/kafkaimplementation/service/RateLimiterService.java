@@ -1,10 +1,11 @@
 package com.arthur.kafkaimplementation.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
+import io.quarkus.logging.Log;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.sortedset.ScoreRange;
+import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -31,22 +32,23 @@ import java.util.UUID;
  *   → Todos voltam a receber notificações sem restrição até o contador se reconstituir.
  *   → Isso demonstra que o estado do rate limiter é volátil e Redis é um ponto de falha.
  */
-@Service
+@ApplicationScoped
 public class RateLimiterService {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimiterService.class);
     private static final String KEY_PREFIX = "rate_limit:";
 
-    private final StringRedisTemplate redis;
+    private final SortedSetCommands<String, String> sortedSet;
+    private final RedisDataSource redisDataSource;
     private final int maxPerMinute;
     private final int windowSeconds;
 
     public RateLimiterService(
-            StringRedisTemplate redis,
-            @Value("${app.rate-limit.max-per-minute}") int maxPerMinute,
-            @Value("${app.rate-limit.window-seconds}") int windowSeconds
+            RedisDataSource redisDataSource,
+            @ConfigProperty(name = "app.rate-limit.max-per-minute", defaultValue = "5") int maxPerMinute,
+            @ConfigProperty(name = "app.rate-limit.window-seconds", defaultValue = "60") int windowSeconds
     ) {
-        this.redis = redis;
+        this.redisDataSource = redisDataSource;
+        this.sortedSet = redisDataSource.sortedSet(String.class);
         this.maxPerMinute = maxPerMinute;
         this.windowSeconds = windowSeconds;
     }
@@ -63,26 +65,25 @@ public class RateLimiterService {
         long windowStartMs = nowMs - (windowSeconds * 1000L);
 
         // Remove entradas fora da janela deslizante
-        redis.opsForZSet().removeRangeByScore(key, 0, windowStartMs);
+        sortedSet.zremrangebyscore(key, new ScoreRange<>(0.0, (double) windowStartMs));
 
         // Conta quantas notificações foram processadas na janela atual
-        Long count = redis.opsForZSet().zCard(key);
-        long currentCount = (count != null) ? count : 0;
+        long currentCount = sortedSet.zcard(key);
 
-        log.debug("Rate limit check — userId={} count={}/{} window={}s",
+        Log.debugf("Rate limit check — userId=%s count=%d/%d window=%ds",
                 userId, currentCount, maxPerMinute, windowSeconds);
 
         if (currentCount >= maxPerMinute) {
-            log.warn("Rate limit EXCEDIDO — userId={} ({} notificações na última janela de {}s)",
+            Log.warnf("Rate limit EXCEDIDO — userId=%s (%d notificações na última janela de %ds)",
                     userId, currentCount, windowSeconds);
             return false;
         }
 
         // Registra este processamento com timestamp como score
-        redis.opsForZSet().add(key, UUID.randomUUID().toString(), nowMs);
+        sortedSet.zadd(key, (double) nowMs, UUID.randomUUID().toString());
 
         // Mantém TTL para que chaves inativas não acumulem no Redis
-        redis.expire(key, Duration.ofSeconds(windowSeconds + 5));
+        redisDataSource.key().expire(key, Duration.ofSeconds(windowSeconds + 5));
 
         return true;
     }
@@ -94,8 +95,7 @@ public class RateLimiterService {
     public long getCount(String userId) {
         String key = KEY_PREFIX + userId;
         long windowStartMs = System.currentTimeMillis() - (windowSeconds * 1000L);
-        redis.opsForZSet().removeRangeByScore(key, 0, windowStartMs);
-        Long count = redis.opsForZSet().zCard(key);
-        return (count != null) ? count : 0;
+        sortedSet.zremrangebyscore(key, new ScoreRange<>(0.0, (double) windowStartMs));
+        return sortedSet.zcard(key);
     }
 }

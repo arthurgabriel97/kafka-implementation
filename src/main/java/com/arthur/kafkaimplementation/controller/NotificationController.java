@@ -3,8 +3,10 @@ package com.arthur.kafkaimplementation.controller;
 import com.arthur.kafkaimplementation.dto.NotificationEvent;
 import com.arthur.kafkaimplementation.producer.NotificationProducer;
 import com.arthur.kafkaimplementation.service.RateLimiterService;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
 import java.time.Instant;
 import java.util.Map;
@@ -26,20 +28,19 @@ import java.util.Map;
  *   GET /api/notifications/rate-limit/{userId}
  *     → Consulta quantas notificações o usuário processou na janela atual
  */
-@RestController
-@RequestMapping("/api/notifications")
+@Path("/api/notifications")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
 public class NotificationController {
 
-    private final NotificationProducer producer;
-    private final RateLimiterService rateLimiter;
+    @Inject
+    NotificationProducer producer;
 
-    public NotificationController(NotificationProducer producer, RateLimiterService rateLimiter) {
-        this.producer = producer;
-        this.rateLimiter = rateLimiter;
-    }
+    @Inject
+    RateLimiterService rateLimiter;
 
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> send(@RequestBody NotificationRequest request) {
+    @POST
+    public Response send(NotificationRequest request) {
         NotificationEvent event = new NotificationEvent(
                 request.userId(),
                 request.type(),
@@ -49,12 +50,12 @@ public class NotificationController {
 
         producer.send(event);
 
-        return ResponseEntity.accepted().body(Map.of(
+        return Response.accepted(Map.of(
                 "status", "publicado",
                 "userId", event.userId(),
                 "type", event.type(),
                 "info", "O rate limit é verificado no consumer, não aqui."
-        ));
+        )).build();
     }
 
     /**
@@ -65,11 +66,12 @@ public class NotificationController {
      *
      * Exemplo: POST /api/notifications/burst?userId=usuario-1&count=8&type=PROMOCAO
      */
-    @PostMapping("/burst")
-    public ResponseEntity<Map<String, Object>> burst(
-            @RequestParam String userId,
-            @RequestParam(defaultValue = "8") int count,
-            @RequestParam(defaultValue = "PROMOCAO") String type
+    @POST
+    @Path("/burst")
+    public Response burst(
+            @QueryParam("userId") String userId,
+            @QueryParam("count") @DefaultValue("8") int count,
+            @QueryParam("type") @DefaultValue("PROMOCAO") String type
     ) {
         for (int i = 1; i <= count; i++) {
             NotificationEvent event = new NotificationEvent(
@@ -81,24 +83,25 @@ public class NotificationController {
             producer.send(event);
         }
 
-        return ResponseEntity.accepted().body(Map.of(
+        return Response.accepted(Map.of(
                 "userId", userId,
                 "enviadas_ao_kafka", count,
                 "limite_por_minuto", 5,
                 "expectativa", "Primeiras 5 processadas, demais vao para DLT"
-        ));
+        )).build();
     }
 
-    @GetMapping("/rate-limit/{userId}")
-    public ResponseEntity<Map<String, Object>> getRateLimit(@PathVariable String userId) {
+    @GET
+    @Path("/rate-limit/{userId}")
+    public Response getRateLimit(@PathParam("userId") String userId) {
         long count = rateLimiter.getCount(userId);
 
-        return ResponseEntity.ok(Map.of(
+        return Response.ok(Map.of(
                 "userId", userId,
                 "notificacoes_na_janela", count,
                 "limite", 5,
                 "bloqueado", count >= 5
-        ));
+        )).build();
     }
 
     public record NotificationRequest(String userId, String type, String message) {}
